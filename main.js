@@ -1,4 +1,10 @@
-const { app, BrowserWindow, Menu, globalShortcut } = require('electron')
+const path = require('path')
+const os = require('os')
+const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron')
+const imagemin = require('imagemin')
+const imageminMozjpeg = require('imagemin-mozjpeg')
+const imageminPngquant = require('imagemin-pngquant')
+const slash = require('slash')
 
 // Set environment
 process.env.NODE_ENV = 'development'
@@ -7,20 +13,40 @@ const isDev = process.env.NODE_ENV !== 'production' ? true : false
 const isMac = process.platform === 'darwin' ? true : false
 
 let mainWindow
+let aboutWindow
 
 function createMainWindow() {
     mainWindow = new BrowserWindow({
         title: 'ImageShrink',
-        width: 500,
+        width: isDev ? 1100 : 500,
         height: 600,
         icon: `${__dirname}/assets/icons/icon_256.png`,
         resizable: isDev,
+        backgroundColor: '#ffffff',
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false
+        }
+    })
+
+    if (isDev) {
+        mainWindow.webContents.openDevTools()
+    }
+
+    mainWindow.loadFile(`${__dirname}/app/index.html`)
+}
+
+function createAboutWindow() {
+    aboutWindow = new BrowserWindow({
+        title: 'About ImageShrink',
+        width: 300,
+        height: 325,
+        icon: `${__dirname}/assets/icons/icon_256.png`,
+        resizable: false,
         alwaysOnTop: isDev
     })
 
-    console.log(isDev);
-
-    mainWindow.loadFile(`${__dirname}/app/index.html`)
+    aboutWindow.loadFile(`${__dirname}/app/about.html`)
 }
 
 app.on('ready', () => {
@@ -29,25 +55,74 @@ app.on('ready', () => {
     const mainMenu = Menu.buildFromTemplate(menu)
     Menu.setApplicationMenu(mainMenu)
 
-    globalShortcut.register('CmdOrCtrl+R', () => mainWindow.reload())
-    globalShortcut.register(isMac ? 'Command+Alt+i' : 'Ctrl+Shift+i', () => mainWindow.toggleDevTools())
-
     mainWindow.on('closed', () => mainWindow = null)
 })
 
 const menu = [
-    ...(isMac ? [{ role: 'appMenu'}] : []),
+    ...(isMac ? [
+        {
+            label: app.menu,
+            submenu: [
+                {
+                    label: 'About',
+                    click: createAboutWindow
+                }
+            ]
+        }
+    ] : []),
     {
-        label: 'File',
-        submenu: [
-            {
-                label: 'Quit',
-                accelerator: 'CmdOrCtrl+W',
-                click: () => app.quit()
-            }
-        ]
-    }
+        role: 'fileMenu'
+    },
+    ...(!isMac ? [
+        {
+            label: 'Help',
+            submenu: [
+                {
+                    label: 'About',
+                    click: createAboutWindow
+                }
+            ]
+        }
+    ] : []),
+    ...(isDev ? [
+        {
+            label: 'Developer',
+            submenu: [
+                { role: 'reload' },
+                { role: 'forceReload' },
+                { type: 'separator' },
+                { role: 'toggledevtools' }
+            ]
+        }
+    ] : [])
 ]
+
+ipcMain.on('image:minimize', (e, options) => {
+    options.dest = path.join(os.homedir(), 'imageoptimizer')
+    optimizeImage(options)
+})
+
+async function optimizeImage({ imgPath, quality, dest }) {
+    try {
+        const pngQuality = quality / 100
+
+        const files = await imagemin([slash(imgPath)], {
+            destination: dest,
+            plugins: [
+                imageminMozjpeg({ quality }),
+                imageminPngquant({
+                    quality: [pngQuality, pngQuality]
+                })
+            ]
+        })
+
+        console.log(files);
+
+        shell.openPath(dest)
+    } catch (err) {
+        console.log(err);
+    }
+}
 
 // Mac stuff
 app.on('activate', function () {
